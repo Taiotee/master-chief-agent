@@ -1,0 +1,122 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Master Chief — standalone Android agent.
+  Every dangerous permission below is requested AT RUNTIME, with an
+  explanation, only when the user turns on the feature that needs it.
+  Declaring a permission here does NOT grant it. See docs/PERMISSIONS.md.
+  The app works (chat, briefing, local brain, Gemini API) with zero
+  permissions granted; phone features degrade gracefully without theirs.
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <!-- Network: Gemini API + weather. -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <!-- Photos / files: duplicate-photo sweep + file clean-up. -->
+    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
+    <uses-permission android:name="android.permission.READ_MEDIA_VIDEO" />
+    <!-- Music: read local audio files (MediaStore) so Chief can learn
+         music taste from songs saved on the phone. Runtime prompt. -->
+    <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
+    <!-- Usage stats: which apps are used, and how often — used for
+         unused-app detection AND for learning which music app is used
+         most. Granted in Settings > Apps > Special access > Usage access,
+         not a runtime prompt. The code already used UsageStatsManager
+         without this declaration; adding it fixes that. -->
+    <uses-permission android:name="android.permission.PACKAGE_USAGE_STATS"
+        tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"
+        android:maxSdkVersion="32" />
+    <!-- Notifications: read/filter/reply. Granted via system settings, not a runtime prompt. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Calls / SMS / contacts: only when the user asks Chief to call or text. -->
+    <uses-permission android:name="android.permission.CALL_PHONE" />
+    <uses-permission android:name="android.permission.SEND_SMS" />
+    <uses-permission android:name="android.permission.READ_SMS" />
+    <uses-permission android:name="android.permission.READ_CONTACTS" />
+    <!-- Calendar: plan the day. -->
+    <uses-permission android:name="android.permission.READ_CALENDAR" />
+    <uses-permission android:name="android.permission.WRITE_CALENDAR" />
+    <!-- Location: weather + location routines. -->
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <!-- Settings by time of day. -->
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+    <uses-permission android:name="android.permission.CHANGE_WIFI_STATE" />
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+    <uses-permission android:name="android.permission.WRITE_SETTINGS"
+        tools:ignore="ProtectedPermissions" />
+    <!-- Voice input. -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <!-- Morning briefing + protocols. -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
+    <uses-permission android:name="android.permission.SET_ALARM" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <!-- Standby chat bubble (floating chat box). Granted in system settings. -->
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+    <uses-permission android:name="android.permission.VIBRATE" />
+    <uses-permission android:name="android.permission.BATTERY_STATS" />
+
+    <uses-feature android:name="android.hardware.microphone" android:required="false" />
+
+    <application
+        android:allowBackup="true"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.MasterChief"
+        android:usesCleartextTraffic="false">
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:launchMode="singleTop"
+            android:windowSoftInputMode="adjustResize">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+            <!-- "Hey Chief" style deep link: other apps / shortcuts can open the chat box. -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:scheme="masterchief" android:host="chat" />
+            </intent-filter>
+        </activity>
+
+        <!-- Notification filtering. The user enables this in
+             Settings > Notifications > Device & app notifications > Master Chief.
+             Android will NOT enable it silently. -->
+        <service
+            android:name=".services.MasterChiefNotificationService"
+            android:exported="false"
+            android:label="@string/notification_service_label"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService" />
+            </intent-filter>
+        </service>
+
+        <!-- Floating standby chat box. Started only after the user grants
+             "Display over other apps" and turns the bubble on in Settings. -->
+        <service
+            android:name=".services.StandbyBubbleService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
+
+        <receiver
+            android:name=".receivers.BootReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+            </intent-filter>
+        </receiver>
+
+        <!-- WorkManager is initialised by the library default; the morning
+             briefing is scheduled from MainActivity on first launch. -->
+    </application>
+</manifest>

@@ -1,0 +1,16 @@
+#!/bin/sh
+# Minimal Gradle wrapper launcher for Master Chief.
+# The official `gradle wrapper` task could not run in the build VM used to
+# create this project (the Gradle daemon was killed by the OS — only
+# ~500 MB free RAM there), so this launcher was written by hand. It does
+# exactly what the official gradlew does for this project: find Java,
+# run gradle/wrapper/gradle-wrapper.jar, which downloads Gradle 8.7
+# (see gradle/wrapper/gradle-wrapper.properties) and runs the build.
+# Opening the project in Android Studio regenerates the official wrapper.
+APP_HOME=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+if [ -n "$JAVA_HOME" ]; then
+  JAVA_CMD="$JAVA_HOME/bin/java"
+else
+  JAVA_CMD="java"
+fi
+exec "$JAVA_CMD" -jar "$APP_HOME/gradle/wrapper/gradle-wrapper.jar" "$@"
