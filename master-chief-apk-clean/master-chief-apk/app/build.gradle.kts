@@ -16,8 +16,8 @@ android {
         // the Play requirement for new apps in 2024+; sideloaded debug builds
         // work the same.
         targetSdk = 34
-        versionCode = 4
-        versionName = "1.3.0"
+        versionCode = 5
+        versionName = "1.4.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables { useSupportLibrary = true }
     }

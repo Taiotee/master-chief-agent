@@ -1,5 +1,7 @@
 package com.masterchief.agent.ui.screens
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -65,6 +67,14 @@ import com.masterchief.agent.ui.theme.TextMuted
 @Composable
 fun SettingsScreen(state: ChiefUiState, vm: ChiefViewModel, onNavigate: (String) -> Unit) {
     val scroll = rememberScrollState()
+
+    // Local-model file picker: pick a .task file already on the phone;
+    // the ViewModel copies it into the app files dir as local_model.task.
+    val modelPicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.GetContent()
+    ) { uri ->
+        if (uri != null) vm.installLocalModel(uri)
+    }
 
     // Model picker dialog — shown while a provider's list is loading,
     // listed, or failed. The error text inside it is the real reason.
@@ -204,6 +214,110 @@ fun SettingsScreen(state: ChiefUiState, vm: ChiefViewModel, onNavigate: (String)
                 onSaveEndpoint = { vm.setCustomEndpoint(it) },
                 onGetModels = { vm.fetchModelList(BrainProvider.CUSTOM) }
             )
+        }
+        Spacer(Modifier.height(12.dp))
+
+        HudPanel("LOCAL MODEL — ON-DEVICE AI") {
+            val lm = state.localModel
+            Text(
+                when {
+                    lm == null -> "No local model installed."
+                    lm.meetsMinSize ->
+                        "Installed: ${lm.fileName} — ${lm.sizeBytes / 1_000_000} MB"
+                    else ->
+                        "Installed: ${lm.fileName} — ${lm.sizeBytes / 1_000_000} MB — " +
+                            "TOO SMALL (needs over 100 MB; the engine will ignore it)"
+                },
+                style = MaterialTheme.typography.bodyMedium
+            )
+            if (lm != null) {
+                Text(lm.path, style = MaterialTheme.typography.labelMedium, color = TextMuted)
+            } else if (state.localModelExpectedPath.isNotBlank()) {
+                Text(
+                    "Expected file: ${state.localModelExpectedPath}",
+                    style = MaterialTheme.typography.labelMedium, color = TextMuted
+                )
+            }
+            Text(
+                if (state.localModelEngineWired)
+                    "Local LLM engine: WIRED — a staged model answers medium tasks offline."
+                else
+                    "Local LLM engine: NOT WIRED in this build. The rule-based Local " +
+                        "Brain (time, alarms, apps, settings) is what answers simple " +
+                        "tasks offline. A staged model file will work once the " +
+                        "MediaPipe engine is wired.",
+                style = MaterialTheme.typography.labelMedium, color = TextMuted
+            )
+            Text(
+                "This phone (OPPO A74 5G, Snapdragon 480, 6 GB RAM, CPU-only): " +
+                    "only small models fit, and they will be slow — a few seconds " +
+                    "per sentence.",
+                style = MaterialTheme.typography.labelMedium, color = TextMuted
+            )
+            Spacer(Modifier.height(8.dp))
+            Row(Modifier.fillMaxWidth()) {
+                Button(
+                    onClick = { modelPicker.launch("*/*") },
+                    enabled = !state.localModelBusy,
+                    modifier = Modifier.weight(1f).padding(end = 4.dp)
+                ) { Text(if (state.localModelBusy) "COPYING…" else "CHOOSE MODEL FILE (.task)") }
+                Button(
+                    onClick = { vm.refreshLocalModel() },
+                    enabled = !state.localModelBusy,
+                    modifier = Modifier.weight(1f).padding(start = 4.dp)
+                ) { Text("REFRESH STATUS") }
+            }
+            if (lm != null) {
+                Button(
+                    onClick = { vm.deleteLocalModel() },
+                    enabled = !state.localModelBusy,
+                    modifier = Modifier.fillMaxWidth().padding(top = 4.dp)
+                ) { Text("REMOVE MODEL") }
+            }
+            if (state.localModelMessage != null) {
+                Text(
+                    state.localModelMessage ?: "",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = SpartanGold,
+                    modifier = Modifier.padding(top = 8.dp)
+                )
+            }
+            Spacer(Modifier.height(8.dp))
+            Text(
+                "GET A MODEL — download on Wi-Fi, these are large:",
+                style = MaterialTheme.typography.bodyMedium
+            )
+            Text(
+                "1. Qwen2.5-0.5B-Instruct (q8 .task) — about 547 MB. Best fit " +
+                    "for this phone: smallest and fastest. Free, no sign-in.",
+                style = MaterialTheme.typography.labelMedium, color = TextMuted
+            )
+            Text(
+                "2. Gemma-2B-IT (q8 .task) — about 2 GB, and gated: accept " +
+                    "Google's Gemma licence on Hugging Face first. Bigger and " +
+                    "slower on this phone.",
+                style = MaterialTheme.typography.labelMedium, color = TextMuted
+            )
+            Text(
+                "After downloading, come back here and tap CHOOSE MODEL FILE, " +
+                    "then pick the .task file. In-app download is NOT implemented " +
+                    "yet — download in your browser (links below), then pick the " +
+                    "file here.",
+                style = MaterialTheme.typography.labelMedium, color = TextMuted
+            )
+            Spacer(Modifier.height(8.dp))
+            Button(
+                onClick = { vm.openUrl("https://huggingface.co/litert-community/Qwen2.5-0.5B-Instruct") },
+                modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)
+            ) { Text("QWEN2.5-0.5B — OPEN PAGE") }
+            Button(
+                onClick = { vm.openUrl("https://huggingface.co/litert-community/Gemma2-2B-IT") },
+                modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)
+            ) { Text("GEMMA-2B-IT — OPEN PAGE") }
+            Button(
+                onClick = { vm.openUrl("https://ai.google.dev/edge/mediapipe/solutions/genai/llm_inference") },
+                modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)
+            ) { Text("GOOGLE AI EDGE — MODEL GUIDE") }
         }
         Spacer(Modifier.height(12.dp))
 

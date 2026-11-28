@@ -3,6 +3,7 @@ package com.masterchief.agent
 import android.app.Application
 import android.content.Intent
 import android.net.Uri
+import android.provider.OpenableColumns
 import android.provider.Settings
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
@@ -21,6 +22,7 @@ import com.masterchief.agent.brain.ClaudeClient
 import com.masterchief.agent.brain.GeminiClient
 import com.masterchief.agent.brain.LocalBrain
 import com.masterchief.agent.brain.LocalLlm
+import com.masterchief.agent.brain.LocalModelInfo
 import com.masterchief.agent.brain.ModelListClient
 import com.masterchief.agent.brain.OpenAiCompatibleClient
 import com.masterchief.agent.brain.ReasoningEffort
@@ -47,6 +49,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import java.io.File
 import java.util.UUID
 
 data class ChiefUiState(
@@ -79,6 +82,12 @@ data class ChiefUiState(
     val customModel: String = "",
     val customEndpoint: String = "",
     val reasoningEffort: ReasoningEffort = ReasoningEffort.AUTO,
+    // Local model staging (Settings > Brain > Local Model).
+    val localModel: LocalModelInfo? = null,
+    val localModelExpectedPath: String = "",
+    val localModelEngineWired: Boolean = LocalLlm.ENGINE_WIRED,
+    val localModelBusy: Boolean = false,
+    val localModelMessage: String? = null,
     // Model picker dialog (Settings > Brain > Get model list).
     val modelList: List<String> = emptyList(),
     val modelListProvider: BrainProvider? = null,
@@ -202,6 +211,7 @@ class ChiefViewModel(app: Application) : AndroidViewModel(app) {
                 voiceEnabled = settings.voiceEnabled.first()
             )
         }
+        refreshLocalModel()
         viewModelScope.launch {
             NotificationHub.notifications.collect { list ->
                 _state.value = _state.value.copy(notifications = list)
@@ -635,6 +645,104 @@ class ChiefViewModel(app: Application) : AndroidViewModel(app) {
             }
             dismissModelList()
         }
+    }
+
+    // ---- Local model staging (Settings > Brain > Local Model) -----------
+
+    /** Re-read the staged model file from disk into the UI state. */
+    fun refreshLocalModel() {
+        _state.value = _state.value.copy(
+            localModel = localLlm.modelInfo(),
+            localModelExpectedPath = localLlm.expectedPath(),
+            localModelEngineWired = LocalLlm.ENGINE_WIRED
+        )
+    }
+
+    private fun pickedDisplayName(uri: Uri): String? {
+        val app = getApplication<Application>()
+        return runCatching {
+            app.contentResolver.query(uri, null, null, null, null)?.use { c ->
+                if (c.moveToFirst()) {
+                    val idx = c.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                    if (idx >= 0) c.getString(idx) else null
+                } else null
+            }
+        }.getOrNull()
+    }
+
+    /** Copy a user-picked .task file into the app files dir as
+     *  local_model.task. Real copy, real errors — never a fake success.
+     *  The file is staged only: the inference engine is not wired yet, so
+     *  staging alone does not make the local LLM answer. */
+    fun installLocalModel(uri: Uri) {
+        viewModelScope.launch(Dispatchers.IO) {
+            _state.value = _state.value.copy(localModelBusy = true, localModelMessage = null)
+            try {
+                val app = getApplication<Application>()
+                val name = pickedDisplayName(uri) ?: uri.lastPathSegment ?: "model.task"
+                if (!name.endsWith(".task", ignoreCase = true)) {
+                    _state.value = _state.value.copy(
+                        localModelBusy = false,
+                        localModelMessage = "That is not a .task model file (picked: $name). " +
+                            "Download the .task file first, then pick it here."
+                    )
+                    return@launch
+                }
+                val tmp = File(app.filesDir, "${LocalLlm.MODEL_FILE_NAME}.tmp")
+                val bytes = app.contentResolver.openInputStream(uri)?.use { input ->
+                    tmp.outputStream().use { out -> input.copyTo(out) }
+                } ?: throw IllegalStateException("Could not open that file.")
+                val dest = File(app.filesDir, LocalLlm.MODEL_FILE_NAME)
+                if (dest.exists()) dest.delete()
+                if (!tmp.renameTo(dest)) {
+                    tmp.delete()
+                    throw IllegalStateException("Could not save the model file.")
+                }
+                val info = localLlm.modelInfo()
+                val mb = bytes / 1_000_000
+                _state.value = _state.value.copy(
+                    localModel = info,
+                    localModelBusy = false,
+                    localModelMessage = if (info != null && !info.meetsMinSize) {
+                        "Saved $name ($mb MB) — but that is too small for a real model " +
+                            "(needs over 100 MB). The engine will ignore it."
+                    } else {
+                        "Model installed: $name ($mb MB), sir. Staged at ${dest.absolutePath}. " +
+                            "The MediaPipe engine is not wired in this build yet, so it cannot " +
+                            "answer — it will work once the engine is wired."
+                    }
+                )
+            } catch (e: Exception) {
+                _state.value = _state.value.copy(
+                    localModelBusy = false,
+                    localModelMessage = "Could not install that file: ${e.message}"
+                )
+            }
+        }
+    }
+
+    /** Delete the staged model file. Nothing else is touched. */
+    fun deleteLocalModel() {
+        viewModelScope.launch(Dispatchers.IO) {
+            _state.value = _state.value.copy(localModelBusy = true, localModelMessage = null)
+            val removed = localLlm.deleteModel()
+            _state.value = _state.value.copy(
+                localModel = localLlm.modelInfo(),
+                localModelBusy = false,
+                localModelMessage = if (removed) "Local model removed, sir."
+                else "No local model file to remove."
+            )
+        }
+    }
+
+    /** Open a web page (model download pages) in the browser. If no browser
+     *  can open it, Chief says so in the chat instead of failing silently. */
+    fun openUrl(url: String) {
+        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url)).apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        runCatching { getApplication<Application>().startActivity(intent) }
+            .onFailure { addChiefMessage("Could not open that page, sir — no browser responded.") }
     }
 
     fun setVoiceEnabled(on: Boolean) {
