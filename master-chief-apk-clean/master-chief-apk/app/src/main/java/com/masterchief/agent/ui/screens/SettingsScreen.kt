@@ -86,6 +86,7 @@ fun SettingsScreen(state: ChiefUiState, vm: ChiefViewModel) {
 
         HudPanel("PERMISSIONS — REAL STATUS") {
             val p = state.permissions
+            @Composable
             fun statusRow(label: String, granted: Boolean?, onOpen: () -> Unit, openLabel: String) {
                 Row(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
                     Column(Modifier.weight(1f)) {
