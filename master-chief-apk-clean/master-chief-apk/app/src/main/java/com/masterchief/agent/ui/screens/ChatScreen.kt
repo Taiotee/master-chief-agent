@@ -37,6 +37,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.masterchief.agent.ChiefUiState
 import com.masterchief.agent.ChiefViewModel
+import com.masterchief.agent.brain.BrainMode
 import com.masterchief.agent.ui.theme.CortanaBlue
 import com.masterchief.agent.ui.theme.NavyPanel
 import com.masterchief.agent.ui.theme.SpartanGold
@@ -49,7 +50,7 @@ import com.masterchief.agent.ui.theme.SpartanGold
  * local brain only.
  */
 @Composable
-fun ChatScreen(state: ChiefUiState, vm: ChiefViewModel) {
+fun ChatScreen(state: ChiefUiState, vm: ChiefViewModel, onNavigate: (String) -> Unit) {
     // Voice input via Android's speech recogniser — real, on-device.
     val voiceLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartActivityForResult()
@@ -67,18 +68,41 @@ fun ChatScreen(state: ChiefUiState, vm: ChiefViewModel) {
             "Brain: ${state.brainMode}  •  Last used: ${state.lastBrainUsed}",
             style = MaterialTheme.typography.labelMedium
         )
-        if (!state.hasGeminiKey) {
+        // Which key the current brain mode needs. If it is missing, the
+        // banner says so and its button goes straight to Settings > Brain.
+        val needsKey = when (state.brainMode) {
+            BrainMode.GEMINI -> !state.hasGeminiKey
+            BrainMode.OPENROUTER -> !state.hasOpenRouterKey
+            BrainMode.OPENAI -> !state.hasOpenAiKey
+            BrainMode.CLAUDE -> !state.hasClaudeKey
+            BrainMode.CUSTOM -> !state.hasCustomKey
+            BrainMode.AUTO -> !(state.hasGeminiKey || state.hasOpenRouterKey ||
+                state.hasOpenAiKey || state.hasClaudeKey || state.hasCustomKey)
+            BrainMode.LOCAL_ONLY -> false
+        }
+        if (needsKey) {
             Spacer(Modifier.height(8.dp))
             Card(
                 Modifier.fillMaxWidth(),
                 colors = CardDefaults.cardColors(containerColor = NavyPanel)
             ) {
-                Text(
-                    "NO GEMINI API KEY — chat uses the local brain only (time, alarms, " +
-                        "apps, simple orders). Add a free key in Settings > Brain for " +
-                        "heavier thinking.",
-                    Modifier.padding(12.dp), color = SpartanGold
-                )
+                Column(Modifier.padding(12.dp)) {
+                    Text(
+                        if (state.brainMode == BrainMode.AUTO)
+                            "NO API KEY SET — chat uses the local brain only (time, alarms, " +
+                                "apps, simple orders). Add a key in Settings > Brain for " +
+                                "heavier thinking."
+                        else
+                            "NO ${state.brainMode} API KEY — chat uses the local brain only " +
+                                "(time, alarms, apps, simple orders). Add it in Settings > " +
+                                "Brain for heavier thinking.",
+                        color = SpartanGold
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    OutlinedButton(onClick = { onNavigate("settings") }) {
+                        Text("OPEN BRAIN SETTINGS")
+                    }
+                }
             }
         }
         Spacer(Modifier.height(8.dp))

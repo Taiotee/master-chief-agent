@@ -27,13 +27,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.masterchief.agent.ChiefUiState
 import com.masterchief.agent.ChiefViewModel
+import com.masterchief.agent.brain.BrainMode
 import com.masterchief.agent.ui.components.DeviceReadouts
 import com.masterchief.agent.ui.components.HudDivider
 import com.masterchief.agent.ui.components.HudHeader
 import com.masterchief.agent.ui.components.HudPanel
 import com.masterchief.agent.ui.components.ScanlineOverlay
 import com.masterchief.agent.ui.components.ShieldGauge
-import com.masterchief.agent.ui.theme.HaloGreen
 import com.masterchief.agent.ui.theme.NavyPanel
 import com.masterchief.agent.ui.theme.SpartanGold
 
@@ -63,16 +63,45 @@ fun CommandScreen(state: ChiefUiState, vm: ChiefViewModel, onNavigate: (String) 
                     charging = state.device?.charging == true
                 )
                 Column(Modifier.weight(1f).padding(start = 12.dp)) {
+                    // Which provider the current brain mode needs, and whether
+                    // its key is set. If not, the button below goes straight
+                    // to Settings > Brain — a real action, not a dead label.
+                    val activeKeySet = when (state.brainMode) {
+                        BrainMode.GEMINI -> state.hasGeminiKey
+                        BrainMode.OPENROUTER -> state.hasOpenRouterKey
+                        BrainMode.OPENAI -> state.hasOpenAiKey
+                        BrainMode.CLAUDE -> state.hasClaudeKey
+                        BrainMode.CUSTOM -> state.hasCustomKey
+                        BrainMode.AUTO -> state.hasGeminiKey || state.hasOpenRouterKey ||
+                            state.hasOpenAiKey || state.hasClaudeKey || state.hasCustomKey
+                        BrainMode.LOCAL_ONLY -> true
+                    }
+                    val activeLabel = when (state.brainMode) {
+                        BrainMode.GEMINI -> "Gemini"
+                        BrainMode.OPENROUTER -> "OpenRouter"
+                        BrainMode.OPENAI -> "OpenAI"
+                        BrainMode.CLAUDE -> "Claude"
+                        BrainMode.CUSTOM -> "Custom endpoint"
+                        BrainMode.AUTO -> "Auto (first key found)"
+                        BrainMode.LOCAL_ONLY -> "Local only"
+                    }
                     Text(
-                        if (state.hasGeminiKey) "GEMINI KEY: SET" else "GEMINI KEY: NOT SET",
+                        "BRAIN: ${state.brainMode} — $activeLabel",
                         style = MaterialTheme.typography.labelMedium,
-                        color = if (state.hasGeminiKey) HaloGreen else SpartanGold
+                        color = SpartanGold
                     )
                     Text(
-                        if (state.hasGeminiKey) "API brain available, sir."
-                        else "Chat uses the local brain only. Add a free key in Settings > Brain.",
+                        if (state.brainMode == BrainMode.LOCAL_ONLY) "No API needed, sir."
+                        else if (activeKeySet) "API key: SET — cloud brain available, sir."
+                        else "API key: NOT SET — chat uses the local brain only.",
                         style = MaterialTheme.typography.bodyMedium
                     )
+                    if (!activeKeySet) {
+                        Spacer(Modifier.height(8.dp))
+                        OutlinedButton(onClick = { onNavigate("settings") }) {
+                            Text("ADD API KEY")
+                        }
+                    }
                     Spacer(Modifier.height(8.dp))
                     Text(
                         "LIVE NOTIFICATIONS: ${state.notifications.size} seen this session",

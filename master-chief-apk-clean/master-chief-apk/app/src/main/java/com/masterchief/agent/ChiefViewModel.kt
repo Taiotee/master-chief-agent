@@ -13,11 +13,15 @@ import com.masterchief.agent.agent.cleanup.CleanupEngine
 import com.masterchief.agent.agent.cleanup.CleanupPermission
 import com.masterchief.agent.agent.cleanup.ClutterItem
 import com.masterchief.agent.agent.cleanup.StorageMonitor
+import com.masterchief.agent.brain.BrainConfig
 import com.masterchief.agent.brain.BrainMode
+import com.masterchief.agent.brain.BrainProvider
 import com.masterchief.agent.brain.BrainRouter
+import com.masterchief.agent.brain.ClaudeClient
 import com.masterchief.agent.brain.GeminiClient
 import com.masterchief.agent.brain.LocalBrain
 import com.masterchief.agent.brain.LocalLlm
+import com.masterchief.agent.brain.OpenAiCompatibleClient
 import com.masterchief.agent.brain.WeatherClient
 import com.masterchief.agent.brain.WeatherNow
 import com.masterchief.agent.data.AppEntry
@@ -60,6 +64,16 @@ data class ChiefUiState(
     val weather: WeatherNow? = null,
     val weatherError: String? = null,
     val hasGeminiKey: Boolean = false,
+    val hasOpenRouterKey: Boolean = false,
+    val hasOpenAiKey: Boolean = false,
+    val hasClaudeKey: Boolean = false,
+    val hasCustomKey: Boolean = false,
+    val geminiModel: String = "",
+    val openRouterModel: String = "",
+    val openAiModel: String = "",
+    val claudeModel: String = "",
+    val customModel: String = "",
+    val customEndpoint: String = "",
     val voiceEnabled: Boolean = true,
     val apps: List<AppEntry> = emptyList(),
     val appsLoaded: Boolean = false,
@@ -76,14 +90,60 @@ class ChiefViewModel(app: Application) : AndroidViewModel(app) {
     private val localBrain = LocalBrain(app)
     private val localLlm = LocalLlm(app)
     private val photoSweeper = PhotoSweeper(app)
-    // The router needs a Gemini factory that reads the key at call time
-    // (the key lives in DataStore, a Flow). runBlocking is used here because
+    // The router needs a client factory that reads the keys at call time
+    // (the keys live in DataStore, a Flow). runBlocking is used here because
     // the factory is called from an IO coroutine; a production build should
-    // cache the key in memory on startup instead.
-    private val realRouter = BrainRouter(app, localBrain, localLlm) { model ->
-        val key = kotlinx.coroutines.runBlocking { settings.geminiApiKey.first() }
-        if (key.isBlank()) null else GeminiClient(key, model)
+    // cache the keys in memory on startup instead. A provider returns null
+    // when its key (or model / endpoint) is not set — the router then says
+    // so plainly instead of failing silently.
+    private val realRouter = BrainRouter(app, localBrain, localLlm) { provider ->
+        val cfg = kotlinx.coroutines.runBlocking { loadBrainConfig() }
+        // Null when the provider is not fully set up (key, model, and for
+        // Custom the endpoint) — the router then explains what is missing.
+        if (!cfg.ready(provider)) null
+        else when (provider) {
+            BrainProvider.GEMINI ->
+                cfg.geminiKey.takeIf { it.isNotBlank() }?.let { GeminiClient(it, cfg.geminiModel) }
+            BrainProvider.OPENROUTER ->
+                cfg.openRouterKey.takeIf { it.isNotBlank() }?.let {
+                    OpenAiCompatibleClient(
+                        it, cfg.openRouterModel,
+                        OpenAiCompatibleClient.OPENROUTER_BASE_URL, "OpenRouter",
+                        OpenAiCompatibleClient.OPENROUTER_HEADERS
+                    )
+                }
+            BrainProvider.OPENAI ->
+                cfg.openAiKey.takeIf { it.isNotBlank() }?.let {
+                    OpenAiCompatibleClient(
+                        it, cfg.openAiModel,
+                        OpenAiCompatibleClient.OPENAI_BASE_URL, "OpenAI"
+                    )
+                }
+            BrainProvider.CLAUDE ->
+                cfg.claudeKey.takeIf { it.isNotBlank() }?.let { ClaudeClient(it, cfg.claudeModel) }
+            BrainProvider.CUSTOM ->
+                if (cfg.customKey.isNotBlank() && cfg.customEndpoint.isNotBlank()) {
+                    OpenAiCompatibleClient(
+                        cfg.customKey, cfg.customModel, cfg.customEndpoint, "Custom"
+                    )
+                } else null
+        }
     }
+
+    /** Read every provider key / model from Settings in one place. */
+    private suspend fun loadBrainConfig(): BrainConfig = BrainConfig(
+        geminiKey = settings.geminiApiKey.first(),
+        geminiModel = settings.geminiModel.first(),
+        openRouterKey = settings.openRouterApiKey.first(),
+        openRouterModel = settings.openRouterModel.first(),
+        openAiKey = settings.openAiApiKey.first(),
+        openAiModel = settings.openAiModel.first(),
+        claudeKey = settings.claudeApiKey.first(),
+        claudeModel = settings.claudeModel.first(),
+        customKey = settings.customApiKey.first(),
+        customModel = settings.customModel.first(),
+        customEndpoint = settings.customEndpoint.first()
+    )
 
     private val _state = MutableStateFlow(
         ChiefUiState(
@@ -106,8 +166,19 @@ class ChiefViewModel(app: Application) : AndroidViewModel(app) {
         refreshDevice()
         refreshWeather()
         viewModelScope.launch {
+            val cfg = loadBrainConfig()
             _state.value = _state.value.copy(
-                hasGeminiKey = settings.geminiApiKey.first().isNotBlank(),
+                hasGeminiKey = cfg.geminiKey.isNotBlank(),
+                hasOpenRouterKey = cfg.openRouterKey.isNotBlank(),
+                hasOpenAiKey = cfg.openAiKey.isNotBlank(),
+                hasClaudeKey = cfg.claudeKey.isNotBlank(),
+                hasCustomKey = cfg.customKey.isNotBlank(),
+                geminiModel = cfg.geminiModel,
+                openRouterModel = cfg.openRouterModel,
+                openAiModel = cfg.openAiModel,
+                claudeModel = cfg.claudeModel,
+                customModel = cfg.customModel,
+                customEndpoint = cfg.customEndpoint,
                 voiceEnabled = settings.voiceEnabled.first()
             )
         }
@@ -260,16 +331,20 @@ class ChiefViewModel(app: Application) : AndroidViewModel(app) {
                     is com.masterchief.agent.agent.Command.RefreshBriefing ->
                         addChiefMessage(briefingText())
                     is com.masterchief.agent.agent.Command.SwitchBrain -> {
-                        val mode = BrainMode.valueOf(cmd.mode)
-                        settings.setBrainMode(mode)
-                        _state.value = _state.value.copy(brainMode = mode)
-                        addChiefMessage("Brain switched to ${mode.name}, sir.")
+                        val mode = runCatching { BrainMode.valueOf(cmd.mode) }.getOrNull()
+                        if (mode == null) {
+                            addChiefMessage("Unknown brain mode, sir: ${cmd.mode}.")
+                        } else {
+                            settings.setBrainMode(mode)
+                            _state.value = _state.value.copy(brainMode = mode)
+                            addChiefMessage("Brain switched to ${mode.name}, sir.")
+                        }
                     }
                     is com.masterchief.agent.agent.Command.Unknown -> {
                         val mode = settings.brainMode.first()
-                        val model = settings.geminiModel.first()
+                        val config = loadBrainConfig()
                         val profile = store.loadProfile()
-                        val result = realRouter.route(mode, text, profile, model)
+                        val result = realRouter.route(mode, text, profile, config)
                         addChiefMessage(result.text, result.engine.name)
                     }
                 }
@@ -392,6 +467,76 @@ class ChiefViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             settings.setGeminiApiKey(key)
             _state.value = _state.value.copy(hasGeminiKey = key.isNotBlank())
+        }
+    }
+
+    fun setGeminiModel(model: String) {
+        viewModelScope.launch {
+            settings.setGeminiModel(model)
+            _state.value = _state.value.copy(geminiModel = model)
+        }
+    }
+
+    fun setOpenRouterKey(key: String) {
+        viewModelScope.launch {
+            settings.setOpenRouterApiKey(key)
+            _state.value = _state.value.copy(hasOpenRouterKey = key.isNotBlank())
+        }
+    }
+
+    fun setOpenRouterModel(model: String) {
+        viewModelScope.launch {
+            settings.setOpenRouterModel(model)
+            _state.value = _state.value.copy(openRouterModel = model)
+        }
+    }
+
+    fun setOpenAiKey(key: String) {
+        viewModelScope.launch {
+            settings.setOpenAiApiKey(key)
+            _state.value = _state.value.copy(hasOpenAiKey = key.isNotBlank())
+        }
+    }
+
+    fun setOpenAiModel(model: String) {
+        viewModelScope.launch {
+            settings.setOpenAiModel(model)
+            _state.value = _state.value.copy(openAiModel = model)
+        }
+    }
+
+    fun setClaudeKey(key: String) {
+        viewModelScope.launch {
+            settings.setClaudeApiKey(key)
+            _state.value = _state.value.copy(hasClaudeKey = key.isNotBlank())
+        }
+    }
+
+    fun setClaudeModel(model: String) {
+        viewModelScope.launch {
+            settings.setClaudeModel(model)
+            _state.value = _state.value.copy(claudeModel = model)
+        }
+    }
+
+    fun setCustomKey(key: String) {
+        viewModelScope.launch {
+            settings.setCustomApiKey(key)
+            _state.value = _state.value.copy(hasCustomKey = key.isNotBlank())
+        }
+    }
+
+    fun setCustomModel(model: String) {
+        viewModelScope.launch {
+            settings.setCustomModel(model)
+            _state.value = _state.value.copy(customModel = model)
+        }
+    }
+
+    fun setCustomEndpoint(url: String) {
+        viewModelScope.launch {
+            settings.setCustomEndpoint(url)
+            _state.value = _state.value.copy(customEndpoint = url.trim().trimEnd('/'))
         }
     }
 

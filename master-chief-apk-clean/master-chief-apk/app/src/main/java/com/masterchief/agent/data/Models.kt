@@ -55,6 +55,6 @@ data class ChatMessage(
 data class LogEntry(
     val epochMs: Long,
     val command: String,
-    val brainUsed: String, // "LOCAL" | "GEMINI_FREE" | "GEMINI_CHEAP"
+    val brainUsed: String, // "LOCAL" | "GEMINI" | "OPENROUTER" | "OPENAI" | "CLAUDE" | "CUSTOM"
     val result: String
 )

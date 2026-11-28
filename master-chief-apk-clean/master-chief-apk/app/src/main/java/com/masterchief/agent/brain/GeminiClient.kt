@@ -24,8 +24,9 @@ import java.util.concurrent.TimeUnit
  */
 class GeminiClient(
     private val apiKey: String,
-    private val model: String = "gemini-2.0-flash"
-) {
+    private val model: String = BrainConfig.DEFAULT_GEMINI_MODEL
+) : ChatBrainClient {
+    override val label: String = "Gemini"
     private val json = Json { ignoreUnknownKeys = true }
     // 30 seconds max: Chief must never hang silently the way the AI Studio
     // web preview did (50+ seconds, no answer, no error). The router also
@@ -48,7 +49,7 @@ class GeminiClient(
     @Serializable
     data class ApiError(val code: Int = 0, val message: String = "", val status: String = "")
 
-    suspend fun ask(systemPrompt: String, userText: String): Result<String> {
+    override suspend fun ask(systemPrompt: String, userText: String): Result<String> {
         if (apiKey.isBlank()) {
             return Result.failure(IllegalStateException(
                 "No Gemini API key. Add your free key from Google AI Studio in Settings > Brain."))

@@ -32,6 +32,7 @@ import com.masterchief.agent.ui.screens.ChatScreen
 import com.masterchief.agent.ui.screens.CleanupScreen
 import com.masterchief.agent.ui.screens.CommandScreen
 import com.masterchief.agent.ui.screens.PhotoScreen
+import com.masterchief.agent.ui.screens.ProfileScreen
 import com.masterchief.agent.ui.screens.SettingsScreen
 import com.masterchief.agent.ui.theme.MasterChiefTheme
 
@@ -87,12 +88,13 @@ class MainActivity : ComponentActivity() {
                         composable("command") {
                             CommandScreen(state, vm) { route -> go(route) }
                         }
-                        composable("chat") { ChatScreen(state, vm) }
+                        composable("chat") { ChatScreen(state, vm) { route -> go(route) } }
                         composable("armory") { AppsScreen(state, vm) }
                         composable("photos") { PhotoScreen(state, vm) }
                         composable("briefing") { BriefingScreen(state, vm) }
                         composable("cleanup") { CleanupScreen(state, vm) }
-                        composable("settings") { SettingsScreen(state, vm) }
+                        composable("profile") { ProfileScreen(state, vm) }
+                        composable("settings") { SettingsScreen(state, vm) { route -> go(route) } }
                     }
                 }
             }

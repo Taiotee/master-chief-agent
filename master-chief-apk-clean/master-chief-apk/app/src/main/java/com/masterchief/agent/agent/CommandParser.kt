@@ -37,7 +37,15 @@ object CommandParser {
             t.contains("clean") && t.contains("photo") -> Command.CleanPhotos()
             t.contains("briefing") || t.contains("my day") -> Command.RefreshBriefing()
             t.contains("switch to local") -> Command.SwitchBrain("LOCAL_ONLY")
-            t.contains("switch to api") || t.contains("switch to gemini") -> Command.SwitchBrain("GEMINI_FREE")
+            t.contains("switch to auto") -> Command.SwitchBrain("AUTO")
+            t.contains("switch to openrouter") || t.contains("switch to open router") ->
+                Command.SwitchBrain("OPENROUTER")
+            t.contains("switch to openai") || t.contains("switch to open ai") ->
+                Command.SwitchBrain("OPENAI")
+            t.contains("switch to claude") || t.contains("switch to anthropic") ->
+                Command.SwitchBrain("CLAUDE")
+            t.contains("switch to custom") -> Command.SwitchBrain("CUSTOM")
+            t.contains("switch to api") || t.contains("switch to gemini") -> Command.SwitchBrain("GEMINI")
             t.contains("play music") || t.startsWith("play ") -> Command.PlayMusic(text)
             else -> Command.Unknown(text)
         }
