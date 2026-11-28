@@ -30,10 +30,10 @@ fun ProfileScreen(state: ChiefUiState, vm: ChiefViewModel) {
     Column(Modifier.fillMaxSize().padding(16.dp)) {
         Text("SPARTAN PROFILE — ${state.profile.callsign}", style = MaterialTheme.typography.titleMedium)
         Spacer(Modifier.height(12.dp))
-        OutlinedTextField(likes, { likes = it }, { Text("Likes (comma separated)") }, Modifier.fillMaxWidth())
-        OutlinedTextField(style, { style = it }, { Text("Style") }, Modifier.fillMaxWidth())
-        OutlinedTextField(music, { music = it }, { Text("Music taste") }, Modifier.fillMaxWidth())
-        OutlinedTextField(mood, { mood = it }, { Text("Current mood") }, Modifier.fillMaxWidth())
+        OutlinedTextField(value = likes, onValueChange = { likes = it }, label = { Text("Likes (comma separated)") }, modifier = Modifier.fillMaxWidth())
+        OutlinedTextField(value = style, onValueChange = { style = it }, label = { Text("Style") }, modifier = Modifier.fillMaxWidth())
+        OutlinedTextField(value = music, onValueChange = { music = it }, label = { Text("Music taste") }, modifier = Modifier.fillMaxWidth())
+        OutlinedTextField(value = mood, onValueChange = { mood = it }, label = { Text("Current mood") }, modifier = Modifier.fillMaxWidth())
         Spacer(Modifier.height(12.dp))
         Button(onClick = {
             vm.saveProfile(state.profile.copy(
