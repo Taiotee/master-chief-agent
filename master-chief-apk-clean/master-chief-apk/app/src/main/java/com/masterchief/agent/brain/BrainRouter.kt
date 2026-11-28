@@ -4,6 +4,8 @@ import android.content.Context
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import com.masterchief.agent.data.SpartanProfile
+import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.withTimeout
 
 /**
  * The auto-switcher. Decides, per request, which brain answers.
@@ -100,15 +102,23 @@ class BrainRouter(
     private suspend fun geminiAsk(
         client: GeminiClient, engine: BrainEngine, text: String, reason: String
     ): BrainResult {
-        val result = client.ask(GeminiClient.SYSTEM_PROMPT, text)
-        return result.fold(
-            onSuccess = { BrainResult(engine, it, reason) },
-            onFailure = { e ->
-                BrainResult(BrainEngine.LOCAL,
-                    "API unavailable (${e.message}). Local brain standing by, sir — " +
-                        "simple orders still work offline.",
-                    "API failed — local fallback.", escalated = true)
+        // Hard 30-second limit: never hang silently. On timeout or any API
+        // failure, say so plainly and fall back to the local brain.
+        return try {
+            val answer = withTimeout(30_000) {
+                client.ask(GeminiClient.SYSTEM_PROMPT, text).getOrThrow()
             }
-        )
+            BrainResult(engine, answer, reason)
+        } catch (e: TimeoutCancellationException) {
+            BrainResult(BrainEngine.LOCAL,
+                "Gemini did not answer in 30 seconds, sir — it may be busy or " +
+                    "out of quota. Local brain standing by; simple orders still work.",
+                "API timed out — local fallback.", escalated = true)
+        } catch (e: Exception) {
+            BrainResult(BrainEngine.LOCAL,
+                "API unavailable (${e.message}). Local brain standing by, sir — " +
+                    "simple orders still work offline.",
+                "API failed — local fallback.", escalated = true)
+        }
     }
 }

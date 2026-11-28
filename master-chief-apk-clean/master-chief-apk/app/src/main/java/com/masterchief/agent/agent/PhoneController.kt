@@ -54,6 +54,15 @@ class PhoneController(private val context: Context) {
         return "Opening $appName, sir."
     }
 
+    /** Open an app by its exact package name (used by the App Armory list). */
+    fun openAppByPackage(pkg: String): String {
+        val intent = context.packageManager.getLaunchIntentForPackage(pkg)
+            ?: return "Cannot launch that app, sir."
+        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        context.startActivity(intent)
+        return "Opening, sir."
+    }
+
     fun dial(numberOrName: String): String {
         val intent = Intent(Intent.ACTION_DIAL, Uri.parse("tel:$numberOrName")).apply {
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)

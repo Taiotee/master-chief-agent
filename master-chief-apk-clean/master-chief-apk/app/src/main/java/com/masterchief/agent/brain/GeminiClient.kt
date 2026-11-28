@@ -27,9 +27,12 @@ class GeminiClient(
     private val model: String = "gemini-2.0-flash"
 ) {
     private val json = Json { ignoreUnknownKeys = true }
+    // 30 seconds max: Chief must never hang silently the way the AI Studio
+    // web preview did (50+ seconds, no answer, no error). The router also
+    // enforces a 30s timeout and reports it clearly.
     private val client = OkHttpClient.Builder()
-        .connectTimeout(15, TimeUnit.SECONDS)
-        .readTimeout(60, TimeUnit.SECONDS)
+        .connectTimeout(10, TimeUnit.SECONDS)
+        .readTimeout(30, TimeUnit.SECONDS)
         .build()
 
     @Serializable

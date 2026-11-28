@@ -2,28 +2,54 @@ package com.masterchief.agent.services
 
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.update
 
 /**
- * Notification filtering.
- *
+ * A live notification seen on this phone.
+ * Only title + text + app package — no message bodies are stored anywhere
+ * else, and nothing is sent off the phone.
+ */
+data class LiveNotification(
+    val id: String,
+    val app: String,
+    val title: String,
+    val text: String,
+    val epochMs: Long
+)
+
+/**
+ * In-memory hub: the service posts here, the Comms/SITREP screens read it.
  * Android only delivers notifications here AFTER the user enables Master
  * Chief in Settings > Notifications > Device & app notifications. The app
- * cannot enable itself, and cannot read notifications silently.
- *
- * What it does: forwards each notification to the ViewModel, which scores
- * it (priority vs noise, using the same idea as the Muse hub: security
- * alerts and direct messages = priority; bulk promos = noise) and shows
- * only priority ones in the Comms screen. Reply/dismiss go through
- * NotificationListenerService APIs, with the user's tap.
- *
- * What it does NOT do: hide notifications system-wide, or reply on its
- * own. Android does not allow that without the user acting.
+ * cannot enable itself, and cannot read notifications silently. If the
+ * listener is off, this list is simply empty and the UI says so.
  */
+object NotificationHub {
+    private val _notifications = MutableStateFlow<List<LiveNotification>>(emptyList())
+    val notifications: StateFlow<List<LiveNotification>> = _notifications
+
+    fun post(n: LiveNotification) {
+        _notifications.update { (listOf(n) + it).take(50) }
+    }
+
+    fun remove(id: String) {
+        _notifications.update { list -> list.filter { it.id != id } }
+    }
+}
+
 class MasterChiefNotificationService : NotificationListenerService() {
     override fun onNotificationPosted(sbn: StatusBarNotification) {
-        // Hand off to the app via a broadcast / repository in the full build.
-        // Kept minimal here: the Comms screen reads active notifications
-        // through getActiveNotifications() when it is open.
+        val title = sbn.notification.extras.getCharSequence("android.title")?.toString().orEmpty()
+        val text = sbn.notification.extras.getCharSequence("android.text")?.toString().orEmpty()
+        if (title.isBlank() && text.isBlank()) return
+        NotificationHub.post(
+            LiveNotification(sbn.key, sbn.packageName, title, text, sbn.postTime)
+        )
     }
-    override fun onNotificationRemoved(sbn: StatusBarNotification) { /* no-op */ }
+
+    override fun onNotificationRemoved(sbn: StatusBarNotification) {
+        NotificationHub.remove(sbn.key)
+    }
 }
