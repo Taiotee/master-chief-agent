@@ -31,9 +31,10 @@ enum class BrainProvider(val label: String, val hint: String) {
     ),
     OPENROUTER(
         "OpenRouter",
-        "One key, many models — get it at openrouter.ai/keys. " +
-            "Default model openai/gpt-4o-mini. Free models also work, e.g. " +
-            "meta-llama/llama-3.3-70b-instruct:free — just paste the model id."
+        "PROVEN — the one that works in your Agent Workspace. One key, many " +
+            "models — get it at openrouter.ai/keys. Default model openai/gpt-6.1-terra, " +
+            "the model already working there (440 models listed). Free models also " +
+            "work, e.g. meta-llama/llama-3.3-70b-instruct:free — just paste the model id."
     ),
     OPENAI(
         "OpenAI",
@@ -60,6 +61,15 @@ fun BrainMode.provider(): BrainProvider? = when (this) {
     else -> null
 }
 
+/**
+ * Reasoning effort — how hard the cloud model thinks before answering.
+ * AUTO means the provider decides (the field is not sent at all).
+ * Only OpenRouter and OpenAI use it: OpenRouter gets reasoning.effort,
+ * OpenAI gets reasoning_effort. Gemini, Claude and Local do not use this
+ * setting, so the selector is hidden for them instead of being a dud.
+ */
+enum class ReasoningEffort { AUTO, LOW, MEDIUM, HIGH }
+
 /** Everything the router needs to reach the cloud brains. Built in the
  *  ViewModel from SettingsRepository at call time, so a key added in
  *  Settings takes effect on the very next message. */
@@ -68,18 +78,23 @@ data class BrainConfig(
     val geminiModel: String = DEFAULT_GEMINI_MODEL,
     val openRouterKey: String = "",
     val openRouterModel: String = DEFAULT_OPENROUTER_MODEL,
+    val openRouterEndpoint: String = DEFAULT_OPENROUTER_ENDPOINT,
     val openAiKey: String = "",
     val openAiModel: String = DEFAULT_OPENAI_MODEL,
+    val openAiEndpoint: String = DEFAULT_OPENAI_ENDPOINT,
     val claudeKey: String = "",
     val claudeModel: String = DEFAULT_CLAUDE_MODEL,
     val customKey: String = "",
     val customModel: String = "",
-    val customEndpoint: String = ""
+    val customEndpoint: String = "",
+    val reasoningEffort: ReasoningEffort = ReasoningEffort.AUTO
 ) {
     companion object {
         const val DEFAULT_GEMINI_MODEL = "gemini-2.0-flash"
-        const val DEFAULT_OPENROUTER_MODEL = "openai/gpt-4o-mini"
+        const val DEFAULT_OPENROUTER_MODEL = "openai/gpt-6.1-terra"
+        const val DEFAULT_OPENROUTER_ENDPOINT = "https://openrouter.ai/api/v1"
         const val DEFAULT_OPENAI_MODEL = "gpt-4o-mini"
+        const val DEFAULT_OPENAI_ENDPOINT = "https://api.openai.com/v1"
         const val DEFAULT_CLAUDE_MODEL = "claude-sonnet-4-20250514"
     }
 

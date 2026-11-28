@@ -9,6 +9,7 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.masterchief.agent.brain.BrainConfig
 import com.masterchief.agent.brain.BrainMode
+import com.masterchief.agent.brain.ReasoningEffort
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 
@@ -27,13 +28,16 @@ class SettingsRepository(private val context: Context) {
         private val GEMINI_MODEL = stringPreferencesKey("gemini_model")
         private val OPENROUTER_KEY = stringPreferencesKey("openrouter_api_key")
         private val OPENROUTER_MODEL = stringPreferencesKey("openrouter_model")
+        private val OPENROUTER_ENDPOINT = stringPreferencesKey("openrouter_endpoint")
         private val OPENAI_KEY = stringPreferencesKey("openai_api_key")
         private val OPENAI_MODEL = stringPreferencesKey("openai_model")
+        private val OPENAI_ENDPOINT = stringPreferencesKey("openai_endpoint")
         private val CLAUDE_KEY = stringPreferencesKey("claude_api_key")
         private val CLAUDE_MODEL = stringPreferencesKey("claude_model")
         private val CUSTOM_KEY = stringPreferencesKey("custom_api_key")
         private val CUSTOM_MODEL = stringPreferencesKey("custom_model")
         private val CUSTOM_ENDPOINT = stringPreferencesKey("custom_endpoint")
+        private val REASONING_EFFORT = stringPreferencesKey("reasoning_effort")
         private val MILITARY_VOICE = booleanPreferencesKey("military_voice")
         private val VOICE_ENABLED = booleanPreferencesKey("voice_enabled")
         private val BUBBLE_ENABLED = booleanPreferencesKey("bubble_enabled")
@@ -53,9 +57,15 @@ class SettingsRepository(private val context: Context) {
     val openRouterModel: Flow<String> = context.dataStore.data.map {
         it[OPENROUTER_MODEL] ?: BrainConfig.DEFAULT_OPENROUTER_MODEL
     }
+    val openRouterEndpoint: Flow<String> = context.dataStore.data.map {
+        it[OPENROUTER_ENDPOINT] ?: BrainConfig.DEFAULT_OPENROUTER_ENDPOINT
+    }
     val openAiApiKey: Flow<String> = context.dataStore.data.map { it[OPENAI_KEY] ?: "" }
     val openAiModel: Flow<String> = context.dataStore.data.map {
         it[OPENAI_MODEL] ?: BrainConfig.DEFAULT_OPENAI_MODEL
+    }
+    val openAiEndpoint: Flow<String> = context.dataStore.data.map {
+        it[OPENAI_ENDPOINT] ?: BrainConfig.DEFAULT_OPENAI_ENDPOINT
     }
     val claudeApiKey: Flow<String> = context.dataStore.data.map { it[CLAUDE_KEY] ?: "" }
     val claudeModel: Flow<String> = context.dataStore.data.map {
@@ -64,6 +74,10 @@ class SettingsRepository(private val context: Context) {
     val customApiKey: Flow<String> = context.dataStore.data.map { it[CUSTOM_KEY] ?: "" }
     val customModel: Flow<String> = context.dataStore.data.map { it[CUSTOM_MODEL] ?: "" }
     val customEndpoint: Flow<String> = context.dataStore.data.map { it[CUSTOM_ENDPOINT] ?: "" }
+    val reasoningEffort: Flow<ReasoningEffort> = context.dataStore.data.map {
+        runCatching { ReasoningEffort.valueOf(it[REASONING_EFFORT] ?: ReasoningEffort.AUTO.name) }
+            .getOrDefault(ReasoningEffort.AUTO)
+    }
     val militaryVoice: Flow<Boolean> = context.dataStore.data.map { it[MILITARY_VOICE] ?: true }
     val voiceEnabled: Flow<Boolean> = context.dataStore.data.map { it[VOICE_ENABLED] ?: true }
     val bubbleEnabled: Flow<Boolean> = context.dataStore.data.map { it[BUBBLE_ENABLED] ?: false }
@@ -86,11 +100,17 @@ class SettingsRepository(private val context: Context) {
     suspend fun setOpenRouterModel(model: String) {
         context.dataStore.edit { it[OPENROUTER_MODEL] = model.trim() }
     }
+    suspend fun setOpenRouterEndpoint(url: String) {
+        context.dataStore.edit { it[OPENROUTER_ENDPOINT] = url.trim().trimEnd('/') }
+    }
     suspend fun setOpenAiApiKey(key: String) {
         context.dataStore.edit { it[OPENAI_KEY] = key.trim() }
     }
     suspend fun setOpenAiModel(model: String) {
         context.dataStore.edit { it[OPENAI_MODEL] = model.trim() }
+    }
+    suspend fun setOpenAiEndpoint(url: String) {
+        context.dataStore.edit { it[OPENAI_ENDPOINT] = url.trim().trimEnd('/') }
     }
     suspend fun setClaudeApiKey(key: String) {
         context.dataStore.edit { it[CLAUDE_KEY] = key.trim() }
@@ -106,6 +126,9 @@ class SettingsRepository(private val context: Context) {
     }
     suspend fun setCustomEndpoint(url: String) {
         context.dataStore.edit { it[CUSTOM_ENDPOINT] = url.trim().trimEnd('/') }
+    }
+    suspend fun setReasoningEffort(effort: ReasoningEffort) {
+        context.dataStore.edit { it[REASONING_EFFORT] = effort.name }
     }
     suspend fun setMilitaryVoice(on: Boolean) {
         context.dataStore.edit { it[MILITARY_VOICE] = on }

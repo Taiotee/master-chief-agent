@@ -29,9 +29,17 @@ class OpenAiCompatibleClient(
     private val model: String,
     private val baseUrl: String,
     override val label: String,
-    private val extraHeaders: Map<String, String> = emptyMap()
+    private val extraHeaders: Map<String, String> = emptyMap(),
+    /** How hard the model thinks. AUTO sends nothing (provider default). */
+    private val reasoningEffort: ReasoningEffort = ReasoningEffort.AUTO,
+    /** Which wire shape the effort uses: OpenAI's reasoning_effort field,
+     *  or OpenRouter's reasoning.effort object. NONE sends no effort. */
+    private val reasoningStyle: ReasoningStyle = ReasoningStyle.NONE
 ) : ChatBrainClient {
-    private val json = Json { ignoreUnknownKeys = true }
+    /** Which reasoning wire shape this endpoint speaks. */
+    enum class ReasoningStyle { NONE, OPENAI, OPENROUTER }
+
+    private val json = Json { ignoreUnknownKeys = true; explicitNulls = false }
     // 30 seconds max, matching the router's hard timeout: Chief must never
     // hang silently the way the AI Studio web preview did.
     private val client = OkHttpClient.Builder()
@@ -44,8 +52,13 @@ class OpenAiCompatibleClient(
         val model: String,
         val messages: List<Msg>,
         val temperature: Double = 0.7,
-        val max_tokens: Int = 1024
+        val max_tokens: Int = 1024,
+        val reasoning_effort: String? = null,
+        val reasoning: ReasoningCfg? = null
     )
+
+    @Serializable
+    data class ReasoningCfg(val effort: String)
 
     @Serializable
     data class Msg(val role: String, val content: String)
@@ -72,7 +85,20 @@ class OpenAiCompatibleClient(
             return Result.failure(IllegalStateException(
                 "No $label endpoint set. Enter the server URL in Settings > Brain."))
         }
-        val body = Req(model, listOf(Msg("system", systemPrompt), Msg("user", userText)))
+        val effort = when (reasoningEffort) {
+            ReasoningEffort.LOW -> "low"
+            ReasoningEffort.MEDIUM -> "medium"
+            ReasoningEffort.HIGH -> "high"
+            ReasoningEffort.AUTO -> null
+        }
+        val body = Req(
+            model = model,
+            messages = listOf(Msg("system", systemPrompt), Msg("user", userText)),
+            reasoning_effort = if (reasoningStyle == ReasoningStyle.OPENAI) effort else null,
+            reasoning = if (reasoningStyle == ReasoningStyle.OPENROUTER && effort != null) {
+                ReasoningCfg(effort)
+            } else null
+        )
         val payload = json.encodeToString(Req.serializer(), body)
             .toRequestBody("application/json".toMediaType())
         val url = baseUrl.trimEnd('/') + "/chat/completions"
@@ -96,9 +122,6 @@ class OpenAiCompatibleClient(
     }
 
     companion object {
-        const val OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
-        const val OPENAI_BASE_URL = "https://api.openai.com/v1"
-
         /** OpenRouter asks apps to identify themselves; these two headers do that. */
         val OPENROUTER_HEADERS = mapOf(
             "HTTP-Referer" to "https://github.com/Taiotee/master-chief-agent",

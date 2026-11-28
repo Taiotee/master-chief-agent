@@ -7,17 +7,23 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
@@ -25,31 +31,73 @@ import com.masterchief.agent.ChiefUiState
 import com.masterchief.agent.ChiefViewModel
 import com.masterchief.agent.brain.BrainMode
 import com.masterchief.agent.brain.BrainProvider
+import com.masterchief.agent.brain.ReasoningEffort
 import com.masterchief.agent.ui.components.HudPanel
 import com.masterchief.agent.ui.theme.HaloGreen
 import com.masterchief.agent.ui.theme.SpartanGold
 import com.masterchief.agent.ui.theme.TextMuted
 
 /**
- * Settings — brain switcher, provider keys and models, voice, profile,
- * and the permissions screen.
+ * Settings — brain switcher, provider keys/models/endpoints, reasoning
+ * effort, voice, profile, and the permissions screen.
  *
- * Brain: one provider selector (Gemini, OpenRouter, OpenAI, Claude, Custom
- * endpoint, Local only, Auto). Every cloud provider has its own API-key
- * field (masked) and model field. Keys are stored on this phone only, in
- * DataStore — never in code, never in git, never sent anywhere except that
- * provider's own endpoint. Without any key, chat uses the local brain only.
+ * Model settings work like a model dialog: each provider block is a draft.
+ * Type a key (blank keeps the saved key), pick or type a model id, edit
+ * the base URL where it applies — then SAVE writes it to DataStore, or
+ * CANCEL throws the draft away. "Get model list" really fetches that
+ * provider's catalogue (needs a saved key and a connection) and tapping a
+ * model saves it at once. Reasoning effort is sent to OpenRouter and
+ * OpenAI only. There is no Execution-mode selector: Master Chief's real
+ * autonomy control is the cleanup permission on the Cleanup screen, and a
+ * second toggle with no wired behaviour would be a dud.
+ *
+ * Keys are stored on this phone only, in DataStore — never in code, never
+ * in git, never sent anywhere except that provider's own endpoint.
  *
  * Every permission shows its REAL state (granted / not granted). Android
  * makes the user grant these in system settings — no app can do it silently,
  * and Chief never pretends a feature works without its permission.
  *
- * No dud buttons: every button here either saves a setting, opens the exact
- * system screen for a permission, or navigates to a real screen.
+ * No dud buttons: every button here either saves a setting, fetches a real
+ * list, opens the exact system screen for a permission, or navigates to a
+ * real screen.
  */
 @Composable
 fun SettingsScreen(state: ChiefUiState, vm: ChiefViewModel, onNavigate: (String) -> Unit) {
     val scroll = rememberScrollState()
+
+    // Model picker dialog — shown while a provider's list is loading,
+    // listed, or failed. The error text inside it is the real reason.
+    val pickerProvider = state.modelListProvider
+    if (pickerProvider != null) {
+        AlertDialog(
+            onDismissRequest = { vm.dismissModelList() },
+            title = { Text("MODELS — ${pickerProvider.label}") },
+            text = {
+                when {
+                    state.modelListLoading -> Text("Fetching model list…")
+                    state.modelListError != null -> Text(state.modelListError ?: "")
+                    else -> Column {
+                        Text("${state.modelList.size} models — tap one to use it.")
+                        Spacer(Modifier.height(8.dp))
+                        LazyColumn(Modifier.height(400.dp)) {
+                            items(state.modelList) { id ->
+                                TextButton(
+                                    onClick = { vm.applyModelChoice(pickerProvider, id) },
+                                    modifier = Modifier.fillMaxWidth()
+                                ) { Text(id, modifier = Modifier.fillMaxWidth()) }
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {},
+            dismissButton = {
+                TextButton(onClick = { vm.dismissModelList() }) { Text("CLOSE") }
+            }
+        )
+    }
+
     Column(Modifier.fillMaxSize().verticalScroll(scroll).padding(16.dp)) {
         Text("SETTINGS — BRAIN & PERMISSIONS", style = MaterialTheme.typography.titleMedium, color = SpartanGold)
         Spacer(Modifier.height(12.dp))
@@ -57,8 +105,8 @@ fun SettingsScreen(state: ChiefUiState, vm: ChiefViewModel, onNavigate: (String)
         HudPanel("BRAIN") {
             Text("Mode (current: ${state.brainMode})", style = MaterialTheme.typography.bodyMedium)
             Text(
-                "AUTO uses the first provider with a key set, in this order: " +
-                    "OpenRouter, Gemini, OpenAI, Claude, Custom. Simple orders " +
+                "AUTO uses the first provider with a key set — OpenRouter first " +
+                    "(the proven one), then Gemini, OpenAI, Claude, Custom. Simple orders " +
                     "stay on-device and cost nothing.",
                 style = MaterialTheme.typography.labelMedium, color = TextMuted
             )
@@ -77,44 +125,102 @@ fun SettingsScreen(state: ChiefUiState, vm: ChiefViewModel, onNavigate: (String)
         }
         Spacer(Modifier.height(12.dp))
 
-        HudPanel("PROVIDERS — KEYS & MODELS") {
-            ProviderBlock(
-                provider = BrainProvider.GEMINI,
-                keySet = state.hasGeminiKey,
-                modelValue = state.geminiModel,
-                onSaveKey = { vm.setGeminiKey(it) },
-                onSaveModel = { vm.setGeminiModel(it) }
+        HudPanel("MODEL SETTINGS") {
+            Text(
+                "OpenRouter is the proven one — start there. The others are " +
+                    "optional extras; each is only used when you enter its key.",
+                style = MaterialTheme.typography.labelMedium, color = TextMuted
             )
             ProviderBlock(
                 provider = BrainProvider.OPENROUTER,
                 keySet = state.hasOpenRouterKey,
                 modelValue = state.openRouterModel,
+                endpointValue = state.openRouterEndpoint,
+                showEndpointField = true,
+                endpointLabel = "Base URL",
+                fixedEndpointText = null,
+                isFetchingModels = state.modelListLoading && pickerProvider == BrainProvider.OPENROUTER,
                 onSaveKey = { vm.setOpenRouterKey(it) },
-                onSaveModel = { vm.setOpenRouterModel(it) }
+                onDeleteKey = { vm.setOpenRouterKey("") },
+                onSaveModel = { vm.setOpenRouterModel(it) },
+                onSaveEndpoint = { vm.setOpenRouterEndpoint(it) },
+                onGetModels = { vm.fetchModelList(BrainProvider.OPENROUTER) }
+            )
+            ProviderBlock(
+                provider = BrainProvider.GEMINI,
+                keySet = state.hasGeminiKey,
+                modelValue = state.geminiModel,
+                endpointValue = "",
+                showEndpointField = false,
+                fixedEndpointText = "Endpoint: https://generativelanguage.googleapis.com/v1beta (fixed)",
+                isFetchingModels = state.modelListLoading && pickerProvider == BrainProvider.GEMINI,
+                onSaveKey = { vm.setGeminiKey(it) },
+                onDeleteKey = { vm.setGeminiKey("") },
+                onSaveModel = { vm.setGeminiModel(it) },
+                onSaveEndpoint = null,
+                onGetModels = { vm.fetchModelList(BrainProvider.GEMINI) }
             )
             ProviderBlock(
                 provider = BrainProvider.OPENAI,
                 keySet = state.hasOpenAiKey,
                 modelValue = state.openAiModel,
+                endpointValue = state.openAiEndpoint,
+                showEndpointField = true,
+                endpointLabel = "Base URL",
+                fixedEndpointText = null,
+                isFetchingModels = state.modelListLoading && pickerProvider == BrainProvider.OPENAI,
                 onSaveKey = { vm.setOpenAiKey(it) },
-                onSaveModel = { vm.setOpenAiModel(it) }
+                onDeleteKey = { vm.setOpenAiKey("") },
+                onSaveModel = { vm.setOpenAiModel(it) },
+                onSaveEndpoint = { vm.setOpenAiEndpoint(it) },
+                onGetModels = { vm.fetchModelList(BrainProvider.OPENAI) }
             )
             ProviderBlock(
                 provider = BrainProvider.CLAUDE,
                 keySet = state.hasClaudeKey,
                 modelValue = state.claudeModel,
+                endpointValue = "",
+                showEndpointField = false,
+                fixedEndpointText = "Endpoint: https://api.anthropic.com/v1 (fixed)",
+                isFetchingModels = state.modelListLoading && pickerProvider == BrainProvider.CLAUDE,
                 onSaveKey = { vm.setClaudeKey(it) },
-                onSaveModel = { vm.setClaudeModel(it) }
+                onDeleteKey = { vm.setClaudeKey("") },
+                onSaveModel = { vm.setClaudeModel(it) },
+                onSaveEndpoint = null,
+                onGetModels = { vm.fetchModelList(BrainProvider.CLAUDE) }
             )
             ProviderBlock(
                 provider = BrainProvider.CUSTOM,
                 keySet = state.hasCustomKey,
                 modelValue = state.customModel,
                 endpointValue = state.customEndpoint,
+                showEndpointField = true,
+                endpointLabel = "Base URL (required)",
+                fixedEndpointText = null,
+                isFetchingModels = state.modelListLoading && pickerProvider == BrainProvider.CUSTOM,
                 onSaveKey = { vm.setCustomKey(it) },
+                onDeleteKey = { vm.setCustomKey("") },
                 onSaveModel = { vm.setCustomModel(it) },
-                onSaveEndpoint = { vm.setCustomEndpoint(it) }
+                onSaveEndpoint = { vm.setCustomEndpoint(it) },
+                onGetModels = { vm.fetchModelList(BrainProvider.CUSTOM) }
             )
+        }
+        Spacer(Modifier.height(12.dp))
+
+        HudPanel("REASONING EFFORT") {
+            Text("Current: ${state.reasoningEffort}", style = MaterialTheme.typography.bodyMedium)
+            Text(
+                "Applies to OpenRouter and OpenAI only. Auto means the provider " +
+                    "decides and nothing extra is sent. Gemini, Claude and Local " +
+                    "do not use this setting.",
+                style = MaterialTheme.typography.labelMedium, color = TextMuted
+            )
+            ReasoningEffort.entries.forEach { effort ->
+                Button(
+                    onClick = { vm.setReasoningEffort(effort) },
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)
+                ) { Text(effort.name) }
+            }
         }
         Spacer(Modifier.height(12.dp))
 
@@ -205,23 +311,34 @@ fun SettingsScreen(state: ChiefUiState, vm: ChiefViewModel, onNavigate: (String)
 }
 
 /**
- * One provider's key + model editor. Top-level (not a local function) so
- * the Compose compiler never confuses it with a plain function.
- * The key field is masked; saving an empty key clears the stored key.
+ * One provider's model settings, as a draft: edit key / model / base URL,
+ * then SAVE writes the changed fields to DataStore, or CANCEL throws the
+ * draft away. A blank key field keeps the saved key; ticking "Delete saved
+ * API key" and saving clears it. Top-level (not a local function) so the
+ * Compose compiler never confuses it with a plain function.
  */
 @Composable
 private fun ProviderBlock(
     provider: BrainProvider,
     keySet: Boolean,
     modelValue: String,
+    endpointValue: String,
+    showEndpointField: Boolean,
+    fixedEndpointText: String?,
+    isFetchingModels: Boolean,
     onSaveKey: (String) -> Unit,
+    onDeleteKey: () -> Unit,
     onSaveModel: (String) -> Unit,
-    endpointValue: String = "",
-    onSaveEndpoint: ((String) -> Unit)? = null
+    onSaveEndpoint: ((String) -> Unit)?,
+    onGetModels: () -> Unit,
+    endpointLabel: String = "Base URL"
 ) {
     var key by remember { mutableStateOf("") }
-    var model by remember { mutableStateOf(modelValue) }
-    var endpoint by remember { mutableStateOf(endpointValue) }
+    // Keyed on the saved value, so picking a model from the list refreshes
+    // the field to the newly saved model id.
+    var model by remember(modelValue) { mutableStateOf(modelValue) }
+    var endpoint by remember(endpointValue) { mutableStateOf(endpointValue) }
+    var deleteKey by remember { mutableStateOf(false) }
     Column(Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
         Text(provider.label, style = MaterialTheme.typography.titleSmall, color = SpartanGold)
         Text(
@@ -231,25 +348,62 @@ private fun ProviderBlock(
         )
         OutlinedTextField(
             value = key, onValueChange = { key = it },
-            label = { Text("${provider.label} API key") },
+            label = { Text("API key (leave blank to keep saved key)") },
             visualTransformation = PasswordVisualTransformation(),
             modifier = Modifier.fillMaxWidth()
         )
-        Button(onClick = { onSaveKey(key); key = "" }) { Text("SAVE KEY") }
-        if (onSaveEndpoint != null) {
+        if (keySet) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Checkbox(checked = deleteKey, onCheckedChange = { deleteKey = it })
+                Text("Delete saved API key", style = MaterialTheme.typography.bodyMedium)
+            }
+        }
+        if (showEndpointField) {
             OutlinedTextField(
                 value = endpoint, onValueChange = { endpoint = it },
-                label = { Text("Endpoint base URL (before /chat/completions)") },
+                label = { Text(endpointLabel) },
                 modifier = Modifier.fillMaxWidth()
             )
-            Button(onClick = { onSaveEndpoint(endpoint) }) { Text("SAVE ENDPOINT") }
+        } else if (fixedEndpointText != null) {
+            Text(fixedEndpointText, style = MaterialTheme.typography.labelMedium, color = TextMuted)
         }
         OutlinedTextField(
             value = model, onValueChange = { model = it },
-            label = { Text("${provider.label} model id") },
+            label = { Text("Model id") },
             modifier = Modifier.fillMaxWidth()
         )
-        Button(onClick = { onSaveModel(model) }) { Text("SAVE MODEL") }
+        Row(Modifier.fillMaxWidth()) {
+            Button(
+                onClick = onGetModels,
+                enabled = !isFetchingModels,
+                modifier = Modifier.weight(1f).padding(end = 4.dp)
+            ) { Text(if (isFetchingModels) "FETCHING…" else "GET MODEL LIST") }
+            Button(
+                onClick = {
+                    if (deleteKey) {
+                        onDeleteKey()
+                        deleteKey = false
+                    } else if (key.isNotBlank()) {
+                        onSaveKey(key)
+                    }
+                    if (model.isNotBlank() && model != modelValue) onSaveModel(model)
+                    if (onSaveEndpoint != null && endpoint.isNotBlank() && endpoint != endpointValue) {
+                        onSaveEndpoint(endpoint)
+                    }
+                    key = ""
+                },
+                modifier = Modifier.weight(1f).padding(start = 4.dp)
+            ) { Text("SAVE") }
+            Button(
+                onClick = {
+                    key = ""
+                    model = modelValue
+                    endpoint = endpointValue
+                    deleteKey = false
+                },
+                modifier = Modifier.weight(1f).padding(start = 4.dp)
+            ) { Text("CANCEL") }
+        }
         Text(provider.hint, style = MaterialTheme.typography.labelMedium, color = TextMuted)
     }
 }

@@ -21,7 +21,9 @@ import com.masterchief.agent.brain.ClaudeClient
 import com.masterchief.agent.brain.GeminiClient
 import com.masterchief.agent.brain.LocalBrain
 import com.masterchief.agent.brain.LocalLlm
+import com.masterchief.agent.brain.ModelListClient
 import com.masterchief.agent.brain.OpenAiCompatibleClient
+import com.masterchief.agent.brain.ReasoningEffort
 import com.masterchief.agent.brain.WeatherClient
 import com.masterchief.agent.brain.WeatherNow
 import com.masterchief.agent.data.AppEntry
@@ -70,10 +72,18 @@ data class ChiefUiState(
     val hasCustomKey: Boolean = false,
     val geminiModel: String = "",
     val openRouterModel: String = "",
+    val openRouterEndpoint: String = "",
     val openAiModel: String = "",
+    val openAiEndpoint: String = "",
     val claudeModel: String = "",
     val customModel: String = "",
     val customEndpoint: String = "",
+    val reasoningEffort: ReasoningEffort = ReasoningEffort.AUTO,
+    // Model picker dialog (Settings > Brain > Get model list).
+    val modelList: List<String> = emptyList(),
+    val modelListProvider: BrainProvider? = null,
+    val modelListLoading: Boolean = false,
+    val modelListError: String? = null,
     val voiceEnabled: Boolean = true,
     val apps: List<AppEntry> = emptyList(),
     val appsLoaded: Boolean = false,
@@ -108,15 +118,19 @@ class ChiefViewModel(app: Application) : AndroidViewModel(app) {
                 cfg.openRouterKey.takeIf { it.isNotBlank() }?.let {
                     OpenAiCompatibleClient(
                         it, cfg.openRouterModel,
-                        OpenAiCompatibleClient.OPENROUTER_BASE_URL, "OpenRouter",
-                        OpenAiCompatibleClient.OPENROUTER_HEADERS
+                        cfg.openRouterEndpoint, "OpenRouter",
+                        OpenAiCompatibleClient.OPENROUTER_HEADERS,
+                        reasoningEffort = cfg.reasoningEffort,
+                        reasoningStyle = OpenAiCompatibleClient.ReasoningStyle.OPENROUTER
                     )
                 }
             BrainProvider.OPENAI ->
                 cfg.openAiKey.takeIf { it.isNotBlank() }?.let {
                     OpenAiCompatibleClient(
                         it, cfg.openAiModel,
-                        OpenAiCompatibleClient.OPENAI_BASE_URL, "OpenAI"
+                        cfg.openAiEndpoint, "OpenAI",
+                        reasoningEffort = cfg.reasoningEffort,
+                        reasoningStyle = OpenAiCompatibleClient.ReasoningStyle.OPENAI
                     )
                 }
             BrainProvider.CLAUDE ->
@@ -136,13 +150,16 @@ class ChiefViewModel(app: Application) : AndroidViewModel(app) {
         geminiModel = settings.geminiModel.first(),
         openRouterKey = settings.openRouterApiKey.first(),
         openRouterModel = settings.openRouterModel.first(),
+        openRouterEndpoint = settings.openRouterEndpoint.first(),
         openAiKey = settings.openAiApiKey.first(),
         openAiModel = settings.openAiModel.first(),
+        openAiEndpoint = settings.openAiEndpoint.first(),
         claudeKey = settings.claudeApiKey.first(),
         claudeModel = settings.claudeModel.first(),
         customKey = settings.customApiKey.first(),
         customModel = settings.customModel.first(),
-        customEndpoint = settings.customEndpoint.first()
+        customEndpoint = settings.customEndpoint.first(),
+        reasoningEffort = settings.reasoningEffort.first()
     )
 
     private val _state = MutableStateFlow(
@@ -175,10 +192,13 @@ class ChiefViewModel(app: Application) : AndroidViewModel(app) {
                 hasCustomKey = cfg.customKey.isNotBlank(),
                 geminiModel = cfg.geminiModel,
                 openRouterModel = cfg.openRouterModel,
+                openRouterEndpoint = cfg.openRouterEndpoint,
                 openAiModel = cfg.openAiModel,
+                openAiEndpoint = cfg.openAiEndpoint,
                 claudeModel = cfg.claudeModel,
                 customModel = cfg.customModel,
                 customEndpoint = cfg.customEndpoint,
+                reasoningEffort = cfg.reasoningEffort,
                 voiceEnabled = settings.voiceEnabled.first()
             )
         }
@@ -537,6 +557,83 @@ class ChiefViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             settings.setCustomEndpoint(url)
             _state.value = _state.value.copy(customEndpoint = url.trim().trimEnd('/'))
+        }
+    }
+
+    fun setOpenRouterEndpoint(url: String) {
+        viewModelScope.launch {
+            settings.setOpenRouterEndpoint(url)
+            _state.value = _state.value.copy(openRouterEndpoint = url.trim().trimEnd('/'))
+        }
+    }
+
+    fun setOpenAiEndpoint(url: String) {
+        viewModelScope.launch {
+            settings.setOpenAiEndpoint(url)
+            _state.value = _state.value.copy(openAiEndpoint = url.trim().trimEnd('/'))
+        }
+    }
+
+    fun setReasoningEffort(effort: ReasoningEffort) {
+        viewModelScope.launch {
+            settings.setReasoningEffort(effort)
+            _state.value = _state.value.copy(reasoningEffort = effort)
+        }
+    }
+
+    /** "Get model list" — fetches the provider's real catalogue. Needs a
+     *  saved key and a connection; otherwise the dialog shows the exact
+     *  reason instead of an empty list. */
+    fun fetchModelList(provider: BrainProvider) {
+        viewModelScope.launch(Dispatchers.IO) {
+            _state.value = _state.value.copy(
+                modelListProvider = provider, modelList = emptyList(),
+                modelListLoading = true, modelListError = null
+            )
+            if (!realRouter.isOnline()) {
+                _state.value = _state.value.copy(
+                    modelListLoading = false,
+                    modelListError = "You appear to be offline, sir — check your connection and try again."
+                )
+                return@launch
+            }
+            val config = loadBrainConfig()
+            ModelListClient.fetch(provider, config).fold(
+                onSuccess = { list ->
+                    _state.value = _state.value.copy(
+                        modelList = list, modelListLoading = false, modelListError = null
+                    )
+                },
+                onFailure = { e ->
+                    _state.value = _state.value.copy(
+                        modelListLoading = false,
+                        modelListError = e.message ?: "Could not fetch the model list."
+                    )
+                }
+            )
+        }
+    }
+
+    fun dismissModelList() {
+        _state.value = _state.value.copy(
+            modelListProvider = null, modelList = emptyList(),
+            modelListLoading = false, modelListError = null
+        )
+    }
+
+    /** User tapped a model in the picker — save it for that provider and
+     *  close the dialog. The Settings screen refreshes the model field
+     *  from the saved value. */
+    fun applyModelChoice(provider: BrainProvider, modelId: String) {
+        viewModelScope.launch {
+            when (provider) {
+                BrainProvider.GEMINI -> setGeminiModel(modelId)
+                BrainProvider.OPENROUTER -> setOpenRouterModel(modelId)
+                BrainProvider.OPENAI -> setOpenAiModel(modelId)
+                BrainProvider.CLAUDE -> setClaudeModel(modelId)
+                BrainProvider.CUSTOM -> setCustomModel(modelId)
+            }
+            dismissModelList()
         }
     }
 
