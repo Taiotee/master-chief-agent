@@ -11,8 +11,8 @@ import java.io.File
  * stays in the app's private files dir — nothing leaves the phone unless
  * the user sends it to the Gemini API in a chat message.
  */
-class JsonStore(private val context: Context) {
-    private val json = Json { ignoreUnknownKeys = true; prettyPrint = true }
+class JsonStore(@PublishedApi internal val context: Context) {
+    @PublishedApi internal val json = Json { ignoreUnknownKeys = true; prettyPrint = true }
 
     inline fun <reified T> load(fileName: String, default: T): T {
         val file = File(context.filesDir, fileName)
